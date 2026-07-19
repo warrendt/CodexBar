@@ -79,9 +79,19 @@ public struct UsageSyncEvent: Codable, Equatable, Sendable, Identifiable {
         guard self.schemaVersion == Self.currentSchemaVersion else {
             throw UsageSyncLedgerError.unsupportedSchemaVersion(self.schemaVersion)
         }
-        for value in [self.idempotencyKey, self.accountID, self.machineID] {
+        for value in [self.idempotencyKey, self.accountID, self.machineID, self.sessionID, self.projectID]
+            .compactMap(\.self)
+        {
             guard Self.isOpaqueIdentifier(value) else {
                 throw UsageSyncLedgerError.invalidIdentifier
+            }
+        }
+        if let model = self.model {
+            let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, trimmed.count <= 256,
+                  trimmed.rangeOfCharacter(from: .controlCharacters) == nil
+            else {
+                throw UsageSyncLedgerError.invalidModel
             }
         }
         for value in [self.inputTokens, self.outputTokens, self.cacheReadTokens, self.cacheWriteTokens] {
@@ -117,6 +127,7 @@ public enum UsageSyncLedgerError: Error, Equatable, Sendable {
     case negativeTokenCount
     case negativeCost
     case invalidCurrencyCode
+    case invalidModel
 }
 
 /// Durable local outbox for opt-in usage synchronization.
@@ -135,8 +146,43 @@ public actor UsageSyncLedger {
         #endif
     }
 
-    public func enqueue(_ events: [UsageSyncEvent]) throws {
+    public func enqueue(_ events: [UsageSyncEvent]) async throws {
         #if canImport(SQLite3) || canImport(CSQLite3)
+        let databaseURL = self.databaseURL
+        try await Task.detached(priority: .utility) {
+            try Self.enqueue(events, at: databaseURL)
+        }.value
+        #else
+        throw UsageSyncLedgerError.unavailable
+        #endif
+    }
+
+    public func pending(limit: Int = 100) async throws -> [UsageSyncEvent] {
+        #if canImport(SQLite3) || canImport(CSQLite3)
+        let databaseURL = self.databaseURL
+        return try await Task.detached(priority: .utility) {
+            try Self.pending(limit: limit, at: databaseURL)
+        }.value
+        #else
+        throw UsageSyncLedgerError.unavailable
+        #endif
+    }
+
+    public func acknowledge(idempotencyKeys: [String]) async throws {
+        #if canImport(SQLite3) || canImport(CSQLite3)
+        let databaseURL = self.databaseURL
+        try await Task.detached(priority: .utility) {
+            try Self.acknowledge(idempotencyKeys: idempotencyKeys, at: databaseURL)
+        }.value
+        #else
+        throw UsageSyncLedgerError.unavailable
+        #endif
+    }
+}
+
+#if canImport(SQLite3) || canImport(CSQLite3)
+extension UsageSyncLedger {
+    private static func enqueue(_ events: [UsageSyncEvent], at databaseURL: URL) throws {
         guard !events.isEmpty else { return }
         let encoded = try events.map { event -> (String, Data) in
             let validated = try event.validated()
@@ -145,7 +191,7 @@ public actor UsageSyncLedger {
             }
             return (validated.idempotencyKey, data)
         }
-        try self.withDatabase { database in
+        try Self.withDatabase(at: databaseURL) { database in
             try Self.execute(database, sql: "BEGIN IMMEDIATE TRANSACTION")
             do {
                 let statement = try Self.statement(
@@ -167,15 +213,11 @@ public actor UsageSyncLedger {
                 throw error
             }
         }
-        #else
-        throw UsageSyncLedgerError.unavailable
-        #endif
     }
 
-    public func pending(limit: Int = 100) throws -> [UsageSyncEvent] {
-        #if canImport(SQLite3) || canImport(CSQLite3)
+    private static func pending(limit: Int, at databaseURL: URL) throws -> [UsageSyncEvent] {
         let boundedLimit = max(1, min(limit, 1_000))
-        return try self.withDatabase { database in
+        return try Self.withDatabase(at: databaseURL) { database in
             let statement = try Self.statement(
                 database,
                 sql: "SELECT payload FROM usage_sync_outbox ORDER BY sequence LIMIT ?1")
@@ -197,15 +239,11 @@ public actor UsageSyncLedger {
             }
             return events
         }
-        #else
-        throw UsageSyncLedgerError.unavailable
-        #endif
     }
 
-    public func acknowledge(idempotencyKeys: [String]) throws {
-        #if canImport(SQLite3) || canImport(CSQLite3)
+    private static func acknowledge(idempotencyKeys: [String], at databaseURL: URL) throws {
         guard !idempotencyKeys.isEmpty else { return }
-        try self.withDatabase { database in
+        try Self.withDatabase(at: databaseURL) { database in
             let statement = try Self.statement(
                 database,
                 sql: "DELETE FROM usage_sync_outbox WHERE idempotency_key = ?1")
@@ -219,14 +257,8 @@ public actor UsageSyncLedger {
                 }
             }
         }
-        #else
-        throw UsageSyncLedgerError.unavailable
-        #endif
     }
-}
 
-#if canImport(SQLite3) || canImport(CSQLite3)
-extension UsageSyncLedger {
     private static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -252,10 +284,6 @@ extension UsageSyncLedger {
             )
             """)
         }
-    }
-
-    private func withDatabase<T>(_ body: (OpaquePointer) throws -> T) throws -> T {
-        try Self.withDatabase(at: self.databaseURL, body)
     }
 
     private static func withDatabase<T>(at url: URL, _ body: (OpaquePointer) throws -> T) throws -> T {

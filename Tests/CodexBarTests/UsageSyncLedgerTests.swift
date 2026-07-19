@@ -20,31 +20,35 @@ struct UsageSyncLedgerTests {
     }
 
     @Test
-    func `ledger rejects invalid privacy identifiers and negative values`() {
-        let event = UsageSyncEvent(
-            idempotencyKey: "event",
-            source: .codexBar,
-            provider: .codex,
-            accountID: "account/path",
-            machineID: "machine",
-            occurredAt: Date(),
-            inputTokens: -1)
-
-        #expect(throws: UsageSyncLedgerError.invalidIdentifier) {
-            try event.validated()
+    func `ledger rejects unsafe opaque identifiers`() {
+        for event in [
+            Self.event(key: "event-account", accountID: "account/path"),
+            Self.event(key: "event-machine", machineID: "machine/path"),
+            Self.event(key: "event-session", sessionID: "session/path"),
+            Self.event(key: "event-project", projectID: "project/path"),
+        ] {
+            #expect(throws: UsageSyncLedgerError.invalidIdentifier) {
+                try event.validated()
+            }
         }
     }
 
-    private static func event(key: String) -> UsageSyncEvent {
+    private static func event(
+        key: String,
+        accountID: String = "account-hash",
+        machineID: String = "machine-hash",
+        sessionID: String? = "session-hash",
+        projectID: String? = "project-hash") -> UsageSyncEvent
+    {
         UsageSyncEvent(
             idempotencyKey: key,
             source: .codexBar,
             provider: .codex,
-            accountID: "account-hash",
-            machineID: "machine-hash",
+            accountID: accountID,
+            machineID: machineID,
             occurredAt: Date(timeIntervalSince1970: 1),
-            sessionID: "session-hash",
-            projectID: "project-hash",
+            sessionID: sessionID,
+            projectID: projectID,
             inputTokens: 10,
             outputTokens: 20,
             cacheReadTokens: 3,
