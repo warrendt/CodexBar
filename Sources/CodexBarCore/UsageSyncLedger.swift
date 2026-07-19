@@ -35,7 +35,9 @@ public struct UsageSyncEvent: Codable, Equatable, Sendable, Identifiable {
     public let estimatedCost: Decimal?
     public let currencyCode: String?
 
-    public var id: String { self.idempotencyKey }
+    public var id: String {
+        self.idempotencyKey
+    }
 
     public init(
         idempotencyKey: String,
@@ -224,20 +226,20 @@ public actor UsageSyncLedger {
 }
 
 #if canImport(SQLite3) || canImport(CSQLite3)
-private extension UsageSyncLedger {
-    static let encoder: JSONEncoder = {
+extension UsageSyncLedger {
+    private static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         return encoder
     }()
 
-    static let decoder: JSONDecoder = {
+    private static let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return decoder
     }()
 
-    static func prepareDatabase(at databaseURL: URL) throws {
+    private static func prepareDatabase(at databaseURL: URL) throws {
         try FileManager.default.createDirectory(
             at: databaseURL.deletingLastPathComponent(),
             withIntermediateDirectories: true)
@@ -252,11 +254,11 @@ private extension UsageSyncLedger {
         }
     }
 
-    func withDatabase<T>(_ body: (OpaquePointer) throws -> T) throws -> T {
+    private func withDatabase<T>(_ body: (OpaquePointer) throws -> T) throws -> T {
         try Self.withDatabase(at: self.databaseURL, body)
     }
 
-    static func withDatabase<T>(at url: URL, _ body: (OpaquePointer) throws -> T) throws -> T {
+    private static func withDatabase<T>(at url: URL, _ body: (OpaquePointer) throws -> T) throws -> T {
         var database: OpaquePointer?
         guard sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil) == SQLITE_OK,
               let database
@@ -271,13 +273,13 @@ private extension UsageSyncLedger {
         return try body(database)
     }
 
-    static func execute(_ database: OpaquePointer, sql: String) throws {
+    private static func execute(_ database: OpaquePointer, sql: String) throws {
         guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
             throw UsageSyncLedgerError.databaseFailure
         }
     }
 
-    static func statement(_ database: OpaquePointer, sql: String) throws -> OpaquePointer {
+    private static func statement(_ database: OpaquePointer, sql: String) throws -> OpaquePointer {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK,
               let statement
@@ -287,14 +289,14 @@ private extension UsageSyncLedger {
         return statement
     }
 
-    static func bind(_ value: String, to statement: OpaquePointer, index: Int32) throws {
+    private static func bind(_ value: String, to statement: OpaquePointer, index: Int32) throws {
         let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
         guard sqlite3_bind_text(statement, index, value, -1, transient) == SQLITE_OK else {
             throw UsageSyncLedgerError.databaseFailure
         }
     }
 
-    static func bind(_ value: Data, to statement: OpaquePointer, index: Int32) throws {
+    private static func bind(_ value: Data, to statement: OpaquePointer, index: Int32) throws {
         let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
         let result = value.withUnsafeBytes { bytes in
             sqlite3_bind_blob(statement, index, bytes.baseAddress, Int32(value.count), transient)
