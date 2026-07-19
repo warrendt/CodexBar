@@ -4,7 +4,7 @@ import Testing
 
 struct UsageSyncLedgerTests {
     @Test
-    func `ledger preserves order deduplicates and acknowledges events`() async throws {
+    func `ledger preserves order, deduplicates, and acknowledges events`() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
