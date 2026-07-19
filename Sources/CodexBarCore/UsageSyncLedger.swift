@@ -113,6 +113,7 @@ public struct UsageSyncEvent: Codable, Equatable, Sendable, Identifiable {
 
     private static func isOpaqueIdentifier(_ value: String) -> Bool {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Exclude path- and URL-like values so identifiers cannot accidentally retain local metadata.
         return !trimmed.isEmpty && trimmed.count <= 256 && !trimmed.contains("/")
     }
 }
@@ -182,6 +183,9 @@ public actor UsageSyncLedger {
 
 #if canImport(SQLite3) || canImport(CSQLite3)
 extension UsageSyncLedger {
+    /// SQLite's `SQLITE_TRANSIENT` sentinel makes SQLite copy bound values before this call returns.
+    private static let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
     private static func enqueue(_ events: [UsageSyncEvent], at databaseURL: URL) throws {
         guard !events.isEmpty else { return }
         let encoded = try events.map { event -> (String, Data) in
@@ -318,16 +322,14 @@ extension UsageSyncLedger {
     }
 
     private static func bind(_ value: String, to statement: OpaquePointer, index: Int32) throws {
-        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-        guard sqlite3_bind_text(statement, index, value, -1, transient) == SQLITE_OK else {
+        guard sqlite3_bind_text(statement, index, value, -1, Self.sqliteTransient) == SQLITE_OK else {
             throw UsageSyncLedgerError.databaseFailure
         }
     }
 
     private static func bind(_ value: Data, to statement: OpaquePointer, index: Int32) throws {
-        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
         let result = value.withUnsafeBytes { bytes in
-            sqlite3_bind_blob(statement, index, bytes.baseAddress, Int32(value.count), transient)
+            sqlite3_bind_blob(statement, index, bytes.baseAddress, Int32(value.count), Self.sqliteTransient)
         }
         guard result == SQLITE_OK else {
             throw UsageSyncLedgerError.databaseFailure
