@@ -103,8 +103,11 @@ public struct UsageSyncEvent: Codable, Equatable, Sendable, Identifiable {
             throw UsageSyncLedgerError.negativeCost
         }
         if let currencyCode = self.currencyCode {
-            let normalized = currencyCode.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard normalized.count == 3, normalized.allSatisfy(\.isLetter) else {
+            let normalized = currencyCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            guard normalized.count == 3,
+                  normalized.allSatisfy(\.isLetter),
+                  Locale.Currency.isoCurrencies.contains(where: { $0.identifier == normalized })
+            else {
                 throw UsageSyncLedgerError.invalidCurrencyCode
             }
         }
