@@ -28,7 +28,7 @@ docs-list:
 	node Scripts/docs-list.mjs
 
 build:
-	swift build
+	GIT_CONFIG_COUNT=0 swift build
 
 test:
 	./Scripts/test.sh
