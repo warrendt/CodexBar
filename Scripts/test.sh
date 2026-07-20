@@ -15,6 +15,11 @@ if [[ "${CODEXBAR_ALLOW_TEST_KEYCHAIN_ACCESS:-}" != "1" ]]; then
   export CODEXBAR_SUPPRESS_TEST_KEYCHAIN_ACCESS=1
 fi
 
+# Some sandbox environments inject GIT_CONFIG_KEY_* / GIT_CONFIG_VALUE_* entries that set
+# safe.bareRepository=explicit, which prevents SwiftPM from resolving its bare-repo cache.
+# Clearing the count resets those injected entries; on normal CI runners this is a no-op.
+export GIT_CONFIG_COUNT=0
+
 ARGS=(
   --group-size "${GROUP_SIZE}"
   --timeout "${SUITE_TIMEOUT}"
